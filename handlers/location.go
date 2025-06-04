@@ -2,12 +2,15 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
-	"fmt"
-
 	"github.com/kiriksik/GeoTrecker/models"
+	redis_pac "github.com/redis/go-redis/v9"
+
 	"github.com/kiriksik/GeoTrecker/redis"
 	"github.com/labstack/echo/v4"
 )
@@ -17,21 +20,111 @@ const locationTTL = 5 * time.Minute
 func PostLocation(c echo.Context) error {
 	var loc models.Location
 	if err := c.Bind(&loc); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid input"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
 	}
 
-	loc.UpdatedAt = time.Now().UTC()
-
-	jsonData, err := json.Marshal(loc)
+	_, err := redis.RBD.GeoAdd(redis.Ctx, "locations", &redis_pac.GeoLocation{
+		Name:      loc.UserID,
+		Longitude: loc.Longitude,
+		Latitude:  loc.Latitude,
+	}).Result()
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Encoding failed"})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Redis GEOADD failed"})
 	}
 
-	key := fmt.Sprintf("location:%s", loc.UserID)
-	err = redis.RBD.Set(redis.Ctx, key, jsonData, locationTTL).Err()
+	loc.UpdatedAt = time.Now()
+	locJSON, _ := json.Marshal(loc)
+	redis.RBD.Set(redis.Ctx, "location_data:"+loc.UserID, locJSON, locationTTL)
+
+	return c.JSON(http.StatusOK, map[string]string{"status": "location stored"})
+}
+
+func GetLocation(c echo.Context) error {
+	userID := c.Param("user_id")
+	val, err := redis.RBD.Get(redis.Ctx, "location_data:"+userID).Result()
+
+	if err == redis.NilError {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "Location not found"})
+	} else if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Redis read error"})
+	}
+
+	var loc models.Location
+	if err := json.Unmarshal([]byte(val), &loc); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Decoding error"})
+	}
+
+	return c.JSON(http.StatusOK, loc)
+}
+
+func GetActiveUsers(c echo.Context) error {
+	var activeUsers []string
+
+	iter := redis.RBD.Scan(redis.Ctx, 0, "location_data:*", 100).Iterator()
+	for iter.Next(redis.Ctx) {
+		key := iter.Val()
+
+		ttl, err := redis.RBD.TTL(redis.Ctx, key).Result()
+		if err != nil {
+			continue
+		}
+		if ttl <= 0 {
+			continue
+		}
+
+		userID := strings.TrimPrefix(key, "location_data:")
+		if userID != "" {
+			activeUsers = append(activeUsers, userID)
+		}
+	}
+
+	if err := iter.Err(); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Redis iteration failed"})
+	}
+
+	return c.JSON(http.StatusOK, map[string][]string{"users": activeUsers})
+}
+
+func GetNearbyUsers(c echo.Context) error {
+	latStr := c.QueryParam("lat")
+	lonStr := c.QueryParam("lon")
+	radiusStr := c.QueryParam("radius")
+
+	var lat, lon, radiusKm float64
+	lat, err1 := strconv.ParseFloat(latStr, 64)
+	lon, err2 := strconv.ParseFloat(lonStr, 64)
+	radiusKm, err3 := strconv.ParseFloat(radiusStr, 64)
+
+	if err1 != nil || err2 != nil || err3 != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid query parameters"})
+	}
+
+	results, err := redis.RBD.GeoSearchLocation(redis.Ctx, "locations", &redis_pac.GeoSearchLocationQuery{
+		GeoSearchQuery: redis_pac.GeoSearchQuery{
+			Longitude:  lon,
+			Latitude:   lat,
+			Radius:     radiusKm,
+			RadiusUnit: "km",
+		},
+		WithCoord: true,
+		WithDist:  true,
+	}).Result()
+
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Redis write failed"})
+		log.Printf("GeoSearchLocation error: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Redis GEOSEARCH failed"})
 	}
 
-	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	var response []map[string]interface{}
+
+	for _, res := range results {
+		response = append(response, map[string]interface{}{
+			"user_id":     res.Name,
+			"lat":         res.Latitude,
+			"lon":         res.Longitude,
+			"distance_km": res.Dist,
+		})
+	}
+
+	return c.JSON(http.StatusOK, response)
 }

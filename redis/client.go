@@ -10,8 +10,9 @@ import (
 )
 
 var (
-	Ctx = context.Background()
-	RBD *redis.Client
+	NilError = redis.Nil
+	Ctx      = context.Background()
+	RBD      *redis.Client
 )
 
 func InitRedis() {

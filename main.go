@@ -5,10 +5,12 @@ import (
 
 	"github.com/kiriksik/GeoTrecker/config"
 	"github.com/kiriksik/GeoTrecker/redis"
+	"github.com/kiriksik/GeoTrecker/router"
 	"github.com/labstack/echo/v4"
 )
 
 func main() {
+	config.LoadConfig()
 	redis.InitRedis()
 
 	e := echo.New()
@@ -28,5 +30,6 @@ func main() {
 	})
 
 	addr := fmt.Sprintf(":%s", config.Cfg.AppPort)
+	router.InitRoutes(e)
 	e.Logger.Fatal(e.Start(addr))
 }
