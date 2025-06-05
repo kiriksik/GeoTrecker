@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kiriksik/GeoTrecker/models"
+	"github.com/kiriksik/GeoTrecker/utils"
 	redis_pac "github.com/redis/go-redis/v9"
 
 	"github.com/kiriksik/GeoTrecker/redis"
@@ -36,6 +37,12 @@ func PostLocation(c echo.Context) error {
 	locJSON, _ := json.Marshal(loc)
 	redis.RBD.Set(redis.Ctx, "location_data:"+loc.UserID, locJSON, locationTTL)
 
+	historyKey := "location_history:" + loc.UserID
+	redis.RBD.RPush(redis.Ctx, historyKey, locJSON)
+	redis.RBD.LTrim(redis.Ctx, historyKey, -100, -1)
+
+	broadcast <- locJSON
+
 	return c.JSON(http.StatusOK, map[string]string{"status": "location stored"})
 }
 
@@ -55,6 +62,26 @@ func GetLocation(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, loc)
+}
+
+func GetLocationHistory(c echo.Context) error {
+	userID := c.Param("user_id")
+	historyKey := "location_history:" + userID
+
+	values, err := redis.RBD.LRange(redis.Ctx, historyKey, 0, -1).Result()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Redis LRange failed"})
+	}
+
+	var locations []models.Location
+	for _, val := range values {
+		var loc models.Location
+		if err := json.Unmarshal([]byte(val), &loc); err == nil {
+			locations = append(locations, loc)
+		}
+	}
+
+	return c.JSON(http.StatusOK, locations)
 }
 
 func GetActiveUsers(c echo.Context) error {
@@ -127,4 +154,73 @@ func GetNearbyUsers(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, response)
+}
+
+func GetGeoJSONHistory(c echo.Context) error {
+	userID := c.Param("user_id")
+	historyKey := "location_history:" + userID
+
+	values, err := redis.RBD.LRange(redis.Ctx, historyKey, 0, -1).Result()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to get history"})
+	}
+
+	var features []models.Feature
+
+	for _, item := range values {
+		var loc models.Location
+		if err := json.Unmarshal([]byte(item), &loc); err != nil {
+			continue
+		}
+
+		f := models.Feature{
+			Type: "Feature",
+		}
+		f.Properties.Timestamp = loc.UpdatedAt.Format(time.RFC3339)
+		f.Geometry.Type = "Point"
+		f.Geometry.Coordinates = []float64{loc.Longitude, loc.Latitude}
+
+		features = append(features, f)
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"type":     "FeatureCollection",
+		"features": features,
+	})
+}
+
+func GetMovementInfo(c echo.Context) error {
+	userID := c.Param("user_id")
+	historyKey := "location_history:" + userID
+
+	values, err := redis.RBD.LRange(redis.Ctx, historyKey, -2, -1).Result()
+	if err != nil || len(values) < 2 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Not enough data"})
+	}
+
+	var prev, curr models.Location
+	if err := json.Unmarshal([]byte(values[0]), &prev); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Invalid previous point"})
+	}
+	if err := json.Unmarshal([]byte(values[1]), &curr); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Invalid current point"})
+	}
+
+	distanceKm := utils.Haversine(prev.Latitude, prev.Longitude, curr.Latitude, curr.Longitude)
+	direction := utils.Bearing(prev.Latitude, prev.Longitude, curr.Latitude, curr.Longitude)
+	timeDiff := curr.UpdatedAt.Sub(prev.UpdatedAt).Seconds()
+
+	var speedKph float64
+	if timeDiff > 0 {
+		speedKph = (distanceKm / timeDiff) * 3600
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"user_id":     userID,
+		"from":        prev,
+		"to":          curr,
+		"distance_km": distanceKm,
+		"direction":   direction,
+		"speed_kph":   speedKph,
+	})
 }
