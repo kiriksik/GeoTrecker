@@ -12,8 +12,8 @@ func InitRoutes(e *echo.Echo) {
 	e.POST("/api/register", handlers.Register)
 
 	e.GET("/ws", handlers.WsHandler)
-	gr := e.Group("/api")
 
+	gr := e.Group("/api")
 	gr.Use(auth.Middleware)
 	{
 		gr.POST("/location", handlers.PostLocation)
@@ -23,8 +23,13 @@ func InitRoutes(e *echo.Echo) {
 		gr.GET("/nearby", handlers.GetNearbyUsers)
 		gr.GET("/geojson/:user_id", handlers.GetGeoJSONHistory)
 		gr.GET("/movement/:user_id", handlers.GetMovementInfo)
-
 		gr.GET("/me", handlers.Me)
+	}
 
+	adminGroup := e.Group("/admin")
+	adminGroup.Use(auth.Middleware, auth.AdminMiddleware)
+	{
+		// adminGroup.GET("/users", handlers.AdminGetUsers)
+		// adminGroup.DELETE("/user/:user_id", handlers.AdminDeleteUser)
 	}
 }

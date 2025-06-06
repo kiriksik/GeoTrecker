@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"time"
@@ -36,9 +37,15 @@ func Register(c echo.Context) error {
 		ID:       req.Username,
 		Username: req.Username,
 		Password: string(hashedPassword),
+		Role:     "user",
 	}
 
-	err = redis.RBD.Set(redis.Ctx, "user:"+user.Username, user.Password, 0).Err()
+	userJson, err := json.Marshal(user)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "JSON marshal error"})
+	}
+
+	err = redis.RBD.Set(redis.Ctx, "user:"+user.Username, userJson, 0).Err()
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Redis save error"})
 	}
@@ -53,16 +60,22 @@ func Login(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 	}
 
-	hashedPassword, err := redis.RBD.Get(redis.Ctx, "user:"+req.Username).Result()
+	userJson, err := redis.RBD.Get(redis.Ctx, "user:"+req.Username).Result()
 	if err != nil {
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "User not found"})
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(req.Password)); err != nil {
+	var user models.User
+	err = json.Unmarshal([]byte(userJson), &user)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "JSON unmarshal error"})
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Wrong password"})
 	}
 
-	token, err := auth.GenerateToken(req.Username, 24*time.Hour)
+	token, err := auth.GenerateToken(user.ID, user.Role, 24*time.Hour)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Token generation failed"})
 	}
@@ -72,12 +85,13 @@ func Login(c echo.Context) error {
 
 func Me(c echo.Context) error {
 	userID, ok := c.Get("user_id").(string)
-	if !ok || userID == "" {
+	role, okRole := c.Get("role").(string)
+	if !ok || !okRole || userID == "" {
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"user_id":  userID,
-		"username": userID,
+		"user_id": userID,
+		"role":    role,
 	})
 }
