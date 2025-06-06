@@ -4,9 +4,9 @@ import RegisterView from '../components/RegisterView.vue'
 import MapView from '../components/MapView.vue'
 
 const routes = [
-  { path: '/login', component: LoginView },
-  { path: '/register', component: RegisterView },
-  { path: '/', component: MapView, meta: { requiresAuth: true } },
+  { path: '/login', component: LoginView, meta: { title: 'Авторизация' } },
+  { path: '/register', component: RegisterView, meta: { title: 'Регистрация' } },
+  { path: '/', component: MapView, meta: { requiresAuth: true, title: 'Карта' } },
 ]
 
 const router = createRouter({
@@ -21,6 +21,10 @@ router.beforeEach((to, from, next) => {
   } else {
     next()
   }
+  if (to.meta.title) {
+    document.title = to.meta.title
+  }
 })
+
 
 export default router

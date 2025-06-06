@@ -3,6 +3,7 @@ package handlers
 import (
 	"log"
 	"net/http"
+	"sync"
 
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
@@ -15,6 +16,7 @@ var upgrader = websocket.Upgrader{
 }
 
 var clients = make(map[*websocket.Conn]bool)
+var clientsMu sync.Mutex
 var broadcast = make(chan []byte)
 
 func WsHandler(c echo.Context) error {
@@ -25,12 +27,16 @@ func WsHandler(c echo.Context) error {
 	}
 	defer ws.Close()
 
+	clientsMu.Lock()
 	clients[ws] = true
+	clientsMu.Unlock()
 
 	for {
 		_, _, err := ws.ReadMessage()
 		if err != nil {
+			clientsMu.Lock()
 			delete(clients, ws)
+			clientsMu.Unlock()
 			log.Println("err:", err)
 			break
 		}
@@ -43,6 +49,8 @@ func BroadcastLocations() {
 	for {
 		msg := <-broadcast
 		log.Println("msg:", msg)
+
+		clientsMu.Lock()
 		for client := range clients {
 			err := client.WriteMessage(websocket.TextMessage, msg)
 			if err != nil {
@@ -50,5 +58,6 @@ func BroadcastLocations() {
 				delete(clients, client)
 			}
 		}
+		clientsMu.Unlock()
 	}
 }

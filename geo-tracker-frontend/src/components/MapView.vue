@@ -15,6 +15,10 @@
   <div class="sidebar-header">
     <h2>Активные пользователи</h2>
     <button class="close-btn" @click="sidebarOpen = false">✕</button>
+    <button v-if="focusedUser" @click="clearFocus" class="clear-button">
+        Сбросить фокус
+    </button>
+
   </div>
   <ul>
     <li 
@@ -54,37 +58,63 @@ const toggleSidebar = () => {
 }
 
 
-const defaultIcon = L.icon({
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41],
-})
 
-const greenIcon = L.icon({
-  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41],
-})
+const routeLine = ref(null)
 
-const focusOn = (userId) => {
+const focusOn = async (userId) => {
   if (markers.value[userId]) {
     focusedUser.value = userId
+
+
     const latlng = markers.value[userId].getLatLng()
     map.value.setView(latlng, 14)
     markers.value[userId].openPopup()
 
+    if (routeLine.value) {
+      map.value.removeLayer(routeLine.value)
+      routeLine.value = null
+    }
 
-    if (window.innerWidth <= 768) {
-      sidebarOpen.value = false
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch(`/api/history/${userId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      })
+      if (!res.ok) throw new Error('Ошибка при загрузке истории')
+      const data = await res.json()
+
+      const points = data.map(p => [p.lat, p.lon])
+      if (points.length > 1) {
+        routeLine.value = L.polyline(points, {
+          color: 'blue',
+          weight: 4,
+          opacity: 0.7,
+          smoothFactor: 1
+        }).addTo(map.value)
+
+        map.value.fitBounds(routeLine.value.getBounds())
+      }
+    } catch (err) {
+      console.error('Ошибка загрузки истории:', err)
     }
   }
 }
+
+
+const clearFocus = () => {
+  focusedUser.value = null
+
+  if (routeLine.value) {
+    map.value.removeLayer(routeLine.value)
+    routeLine.value = null
+  }
+
+    map.value.setView([59.9343, 30.3351], 12)
+
+}
+
 
 
 const logout = () => {
@@ -137,7 +167,7 @@ const startLocationUpdates = () => {
         console.error('Geolocation error:', err)
       }
     )
-  }, 10000)
+  }, 1000)
 }
 
 onUnmounted(() => {
@@ -145,7 +175,7 @@ onUnmounted(() => {
 })
 
 onMounted(() => {
-  map.value = L.map('map').setView([55.75, 37.61], 10)
+  map.value = L.map('map').setView([59.9343, 30.3351], 12)
 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 18,
@@ -163,8 +193,41 @@ onMounted(() => {
     const { user_id, lat, lon } = data
 
     if (!markers.value[user_id]) {
-      const icon = user_id === username ? greenIcon : defaultIcon
-      markers.value[user_id] = L.marker([lat, lon], { icon }).addTo(map.value).bindPopup(user_id)
+      const initials = user_id.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 3)
+
+        const iconHtml = `
+        <div style="
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-weight: bold;
+            color: ${user_id === username ? '#27ae60' : '#2980b9'};
+            font-size: 0.75rem;
+        ">
+            <div style="
+            background: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-bottom: 2px;
+            box-shadow: 0 0 2px rgba(0,0,0,0.3);
+            ">${initials}</div>
+            <img src="${user_id === username ? '/icons/green_icon.png' : '/icons/red_icon.png'}"/>
+        </div>
+        `
+
+        const icon = L.divIcon({
+        html: iconHtml,
+        className: '',
+        iconSize: [25, 50],
+        iconAnchor: [12, 70],
+        popupAnchor: [0, -45],
+        })
+
+        markers.value[user_id] = L.marker([lat, lon], { icon }).addTo(map.value)
+
+      if (user_id === username)
+        focusOn(user_id)
     } else {
       markers.value[user_id].slideTo([lat, lon], {
         duration: 1000,
@@ -172,8 +235,7 @@ onMounted(() => {
       })
     }
 
-    const group = L.featureGroup(Object.values(markers.value))
-    map.value.fitBounds(group.getBounds().pad(0.5))
+    
   }
 
   startLocationUpdates()
@@ -303,22 +365,45 @@ button:hover {
   cursor: pointer;
 }
 
+.sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.close-btn {
+  display: none;
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+}
+
 /* Responsive styles */
 @media (max-width: 768px) {
+  .header {
+    flex-direction: column;
+    height: auto;
+    padding: 0.5rem;
+    gap: 0.3rem;
+  }
+
   .burger {
     display: block;
   }
-
+.sidebar.open {
+    position:relative;
+}
   .sidebar {
-    position: absolute;
-    top: 56px;
+    position:absolute;
+    top: auto;
     left: 0;
     width: 100%;
-    height: 200px;
+    height: auto;
     background: #34495e;
-    z-index: 10;
-    transform: translateY(-130%);
-    transition: transform 0.3s ease;
+    z-index: 401;
+    transform: translateY(-500%);
+    transition: transform 0.4s ease;
   }
 
   .sidebar.open {
@@ -330,9 +415,9 @@ button:hover {
     height: auto;
   }
 
-.close-btn {
-    display: block;
-  }
+    .close-btn {
+        display: block;
+    }
 }
 
 
@@ -358,26 +443,32 @@ button:hover {
     width: 100%;
     margin-top: 0.5rem;
   }
-
+.sidebar.open {
+    position:relative;
+}
   .sidebar {
+    
     padding: 0.75rem;
   }
 }
 
-.sidebar-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.close-btn {
-  display: none;
-  background: none;
+.clear-button {
+  margin-top: 1rem;
+  margin-left: 1rem;
+  margin-right: 1rem;
+  padding-bottom: 0.4rem;
+  padding: 0.5rem 1rem;
+  background: #e74c3c;
+  color: white;
   border: none;
-  font-size: 1.5rem;
+  border-radius: 4px;
   cursor: pointer;
+  width: 100%;
 }
 
+.clear-button:hover {
+  background: #c0392b;
+}
 
 
 </style>
