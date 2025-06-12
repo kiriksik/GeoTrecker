@@ -49,6 +49,7 @@ const login = async () => {
     if (!resMe.ok) throw new Error(dataMe.error || 'Login failed')
 
     localStorage.setItem('username', dataMe.username)
+    localStorage.setItem('role', dataMe.role)
     router.push('/')
   } catch (err) {
     error.value = err.message

@@ -287,7 +287,7 @@ onMounted(() => {
 }
 
 .sidebar {
-  width: 280px;
+  width: 320px;
   background-color: #34495e;
   border-right: 2px solid #22313f;
   padding: 1rem;

@@ -91,7 +91,8 @@ func Me(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"user_id": userID,
-		"role":    role,
+		"user_id":  userID,
+		"username": userID,
+		"role":     role,
 	})
 }

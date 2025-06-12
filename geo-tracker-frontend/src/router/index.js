@@ -2,11 +2,15 @@ import { createRouter, createWebHistory } from 'vue-router'
 import LoginView from '../components/LoginView.vue'
 import RegisterView from '../components/RegisterView.vue'
 import MapView from '../components/MapView.vue'
+import AdminMapView from '../components/AdminMap.vue'
 
 const routes = [
   { path: '/login', component: LoginView, meta: { title: 'Авторизация' } },
   { path: '/register', component: RegisterView, meta: { title: 'Регистрация' } },
   { path: '/', component: MapView, meta: { requiresAuth: true, title: 'Карта' } },
+  { path: '/admin', name: 'AdminMap', component: AdminMapView, meta: { requiresAuth: true, requiresAdmin: true },
+}
+
 ]
 
 const router = createRouter({

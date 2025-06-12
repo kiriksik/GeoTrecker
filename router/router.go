@@ -26,10 +26,12 @@ func InitRoutes(e *echo.Echo) {
 		gr.GET("/me", handlers.Me)
 	}
 
-	adminGroup := e.Group("/admin")
+	adminGroup := gr.Group("/admin")
 	adminGroup.Use(auth.Middleware, auth.AdminMiddleware)
 	{
-		// adminGroup.GET("/users", handlers.AdminGetUsers)
-		// adminGroup.DELETE("/user/:user_id", handlers.AdminDeleteUser)
+		adminGroup.GET("/users", handlers.AdminGetUsers)
+		adminGroup.DELETE("/users/:user_id", handlers.AdminDeleteUser)
+		adminGroup.GET("/users/:user_id/history", handlers.AdminGetUserHistory)
+
 	}
 }
